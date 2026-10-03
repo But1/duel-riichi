@@ -4,3 +4,48 @@
 @media(max-width:740px){.game-layout{display:flex;flex-direction:column;gap:15px}.table-wrap,.sidebar{width:100%}.topbar{min-height:70px}.brand strong{font-size:18px}.brand-mark{height:35px;width:28px;font-size:20px}.brand small{font-size:8px}.topbar nav{gap:17px}.text-button{font-size:12px}.workspace{padding:17px 12px}.game-heading{margin:0 4px 16px}.game-heading h1{font-size:19px}.round-badge{font-size:14px}.game-heading .eyebrow{font-size:10px}.felt{min-height:565px;padding:17px 18px}.hand .tile{--w:clamp(16px,5.05vw,37px);--h:clamp(35px,8vw,53px)}.hand .tile .man-mark{font-size:clamp(12px,2.8vw,20px);gap:2px}.hand .tile .man-mark b{font-size:clamp(14px,3.4vw,23px)}.hand .tile .honor-mark{font-size:clamp(19px,4.5vw,31px)}.hand{gap:2px}.hand-zone{min-height:66px;margin-bottom:19px}.human{margin-top:21px}.opponent-tiles .tile{--w:27px;--h:37px}.opponent-river{margin-top:17px}.river{min-height:37px}.table-center{margin-top:18px;margin-bottom:18px;max-width:360px;min-height:80px}.sidebar{display:grid;grid-template-columns:1fr 1fr;gap:12px}.action-panel{grid-column:1/-1;min-height:0;padding:19px}.action-panel>p{margin-top:6px}.panel-overline{margin-bottom:8px}.action-buttons{margin-top:15px;display:flex;flex-direction:row;flex-wrap:wrap}.action-buttons .button{flex:1;min-width:135px}.dora-panel,.event-panel{padding:16px}.event-panel ol{max-height:135px}.table-footnote{flex-direction:row;font-size:10px;justify-content:space-between;gap:8px;padding:10px 15px}.guess-grid{max-width:420px;margin:18px auto 0;gap:10px}.guess-suit{gap:5px}.guess-suit .tile{--h:48px}.guess-suit .tile .man-mark{font-size:17px;gap:2px}.guess-suit .tile .man-mark b{font-size:20px}.guess-suit .tile .honor-mark{font-size:28px}.guess-label{max-width:420px;margin:18px auto 0}.selected-guesses{max-width:420px;margin:10px auto 0}.bottom-note{font-size:10px;padding:15px 3px;gap:6px}.bottom-note .separator{margin:0 2px}.rules-grid{grid-template-columns:1fr;gap:20px}dialog{padding:28px 22px}.rules-dialog>h2{font-size:25px}.result-tiles .tile{--w:25px;--h:37px}.result-tiles .tile .man-mark{font-size:12px}.result-tiles .tile .man-mark b{font-size:16px}.result-tiles .tile .honor-mark{font-size:24px}.draw-candidate .tile{--w:30px;--h:43px}.draw-candidate small{font-size:10px}.seat-header{margin-bottom:14px}}
 @media(max-width:390px){.felt{padding:15px 10px}.hand .tile{--w:5.05vw;--h:8.7vw}.hand .tile.drawn{margin-left:3px}.hand .tile .man-mark{font-size:12px}.hand .tile .man-mark b{font-size:14px}.hand .tile .honor-mark{font-size:19px}.hand{gap:1px}.opponent-tiles{gap:2px}.opponent-tiles .tile{--w:5.05vw;--h:8vw}.score>span{font-size:20px}.seat-wind{margin-left:3px;font-size:10px}.seat-header strong{font-size:13px}.topbar nav{gap:10px}.game-heading h1{font-size:17px}.game-heading .eyebrow{font-size:9px}.table-footnote{font-size:9px}.sidebar{grid-template-columns:1fr}.action-panel{grid-column:auto}.dora-panel{display:none}.bottom-note{flex-wrap:wrap}.draw-candidate .tile{--w:24px;--h:35px}.draw-candidate small{font-size:9px}}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* Match setup and the added table information follow the existing felt theme. */
+[hidden]{display:none!important}
+.setup-dialog{width:min(460px,calc(100% - 30px))}
+.setup-dialog h2{margin-top:8px;font-size:24px}
+.setup-dialog p{font-size:16px;color:#c2d0ba;line-height:1.75}
+.setup-field{display:block;margin-top:22px;font-size:16px;color:var(--text)}
+.setup-field select,.setup-field input{display:block;width:100%;min-height:48px;margin-top:8px;background:#10271e;color:var(--text);border:1px solid #91aa8166;border-radius:5px;padding:10px 12px;font:inherit}
+.setup-field select:focus-visible,.setup-field input:focus-visible{outline:2px solid var(--gold);outline-offset:3px}
+.number-field{display:flex;align-items:center;gap:12px}
+.number-field input{min-width:0}
+.number-field>span{padding-top:8px}
+.setup-dialog .setup-note{font-size:14px;color:var(--muted)}
+.setup-dialog .error-message{color:#ffe0d5}
+.opponent-hand-zone{display:flex;align-items:end;justify-content:center;gap:14px;flex-wrap:wrap}
+.draw-candidate:empty{display:none}
+.draw-candidate small{font-size:14px;line-height:1.35;white-space:nowrap}
+.hand-zone{flex-wrap:wrap;row-gap:14px}
+.result-hand-layout{display:flex;align-items:start;justify-content:center;flex-wrap:wrap;gap:18px;margin:24px 0}
+.result-concealed{min-width:0;max-width:100%}
+.result-hand-layout .result-tiles{margin:12px 0 6px}
+.result-winning-tile{padding:12px 16px;border:1px solid #d4b37688;border-radius:7px;background:#dfc38e12;color:var(--gold);flex-shrink:0}
+.result-winning-tile p,.result-winning-tile>span{font-size:14px}
+.result-winning-tile .result-tiles{margin-bottom:12px}
+.result-melds{display:flex;flex-wrap:wrap;justify-content:center;gap:18px;margin-bottom:20px}
+.result-melds .result-tiles{margin:10px 0}
+.match-win>span{display:block;font-size:14px;line-height:1.7;margin-top:6px}
+.guess-history-panel{background:var(--panel);border:1px solid var(--border);border-radius:9px;padding:20px}
+.guess-history-panel .panel-heading h2{font-size:16px}
+.guess-history-panel .panel-heading>span{font-size:14px}
+.guess-history-panel ol{list-style:none;padding:0;margin:0;max-height:280px;overflow:auto;scrollbar-width:thin;scrollbar-color:#6e896d transparent}
+.guess-history-panel li{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 0;border-top:1px solid var(--border);font-size:14px}
+.guess-history-panel li:first-child{border-top:0;padding-top:2px}
+.history-tiles{display:flex;gap:5px;padding-bottom:3px}
+.history-tiles .tile{--w:28px;--h:40px}
+.history-tiles .tile .man-mark{font-size:14px;gap:2px}
+.history-tiles .tile .man-mark b{font-size:17px}
+.history-tiles .tile .honor-mark{font-size:25px}
+.guess-outcome{color:#b8cbb0}
+.guess-outcome.hit{color:var(--gold)}
+.history-empty{color:var(--muted)}
+.guess-suit .tile.guessed-before{box-shadow:0 4px 0 var(--gold-dark)}
+.guess-suit .tile.guessed-before.selected{outline:2px solid var(--gold);box-shadow:0 4px 0 var(--gold)}
+.guess-history-key{font-size:14px;color:#bdcbb5;line-height:1.75;margin-top:16px}
+@media(max-width:740px){.guess-history-panel{grid-column:1/-1;padding:19px}.opponent-tiles{gap:2px;min-width:0}.opponent-tiles .tile{--w:clamp(16px,4.5vw,27px);--h:clamp(29px,6.5vw,39px)}.opponent-tiles .tile .man-mark{font-size:13px;gap:2px}.opponent-tiles .tile .man-mark b{font-size:16px}.opponent-tiles .tile .honor-mark{font-size:24px}.hand-zone,.opponent-hand-zone{column-gap:10px}.result-dialog .dialog-buttons{flex-wrap:wrap}.result-hand-layout{gap:14px}.game-heading{gap:12px}.round-badge{flex-shrink:0}}

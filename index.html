@@ -7,9 +7,9 @@
   <meta name="description" content="二人麻將：摸打、聽牌、猜牌，與 AI 進行日本麻將變體對戰。">
   <title>二人麻將 · DUEL RIICHI</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='9' fill='%231b5144'/%3E%3Crect x='9' y='5' width='22' height='29' rx='4' fill='%23f5f0e2'/%3E%3Cpath d='M20 9v21M14 15h12v9H14z' fill='none' stroke='%23ad4438' stroke-width='2.5'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="./style.css">
+  <link rel="stylesheet" href="./style.css?v=3">
   <script src="./runtime.js"></script>
-  <script src="./app.js" defer></script>
+  <script src="./app.js?v=3" defer></script>
 </head>
 <body>
   <header class="topbar">
@@ -24,7 +24,7 @@
         <div class="felt" id="table">
           <section class="seat opponent" aria-label="AI 玩家">
             <div class="seat-header"><div class="player-identity"><span class="avatar ai-avatar">AI</span><div><strong>電腦對手 <span id="ai-dealer" class="seat-wind">東・莊</span></strong><span class="seat-detail" id="ai-detail">以公開資訊判斷</span></div></div><div class="score"><span id="ai-score">30,000</span><small>點</small></div></div>
-            <div class="opponent-tiles" id="ai-hand" aria-label="AI 的暗牌"></div><div class="meld-row" id="ai-melds"></div>
+            <div class="opponent-hand-zone"><div class="opponent-tiles" id="ai-hand" aria-label="AI 的手牌"></div><div class="draw-candidate" id="ai-winning-tile"></div></div><div class="meld-row" id="ai-melds"></div>
           </section>
           <section class="river-section opponent-river"><div class="river-caption"><span>對手牌河</span><span id="ai-turns">0 / 18 巡</span></div><div class="river" id="ai-river"></div></section>
           <div class="table-center"><div class="wall-stat"><span class="wall-icon" aria-hidden="true">▥</span><span><strong id="wall-count">—</strong><small>牌山剩餘</small></span></div><div class="center-emblem"><span id="center-phase">A</span><small id="center-title">摸打階段</small></div><div class="center-meta"><div id="dice" aria-label="開局骰子">⚄ ⚂</div><small>供託 <span id="pot">0</span></small></div></div>
@@ -40,6 +40,7 @@
       </section>
       <aside class="sidebar">
         <section class="action-panel" aria-labelledby="action-heading"><div class="panel-overline"><span id="action-overline">輪到你</span><span class="step-counter" id="step-counter">A</span></div><h2 id="action-heading">準備開局</h2><p id="action-description">正在洗牌及配牌。</p><div id="action-content"></div><div class="action-buttons" id="actions"></div></section>
+        <section class="guess-history-panel" id="guess-history-panel" aria-labelledby="guess-history-heading" hidden><div class="panel-heading"><h2 id="guess-history-heading">你的猜牌紀錄</h2><span id="guess-history-count"></span></div><ol id="guess-history-list" aria-live="polite" aria-relevant="additions"></ol></section>
         <section class="dora-panel"><div class="panel-heading"><h2>寶牌指示牌</h2><span>王牌 14 張</span></div><div class="dora-row" id="dora-row"></div><p id="dora-help">指示牌的下一張為寶牌。</p></section>
         <section class="event-panel"><div class="panel-heading"><h2>牌局紀錄</h2><span id="event-count"></span></div><ol id="event-list" aria-live="polite" aria-relevant="additions"></ol></section>
       </aside>
@@ -47,8 +48,20 @@
     <div class="bottom-note"><span class="tiny-tile">A</span>摸打至聽牌<span class="separator">/</span><span class="tiny-tile gold">B</span>猜兩張 · 自摸五次<span class="fair-ai">AI 只依自己的手牌與公開牌面決策</span></div>
     <p id="error-message" class="error-message" role="alert" hidden></p>
   </main>
-  <dialog id="rules-dialog" class="rules-dialog"><form method="dialog"><button class="close-dialog" aria-label="關閉規則">×</button></form><span class="eyebrow">HOW TO PLAY</span><h2>二人麻將規則</h2><p class="dialog-intro">以日麻為基礎，多一場讀牌與猜牌的對決。</p><div class="rules-grid"><section><h3><b>A</b> 摸打與宣告</h3><p>雙方各 30,000 點。隨機指定第一局莊家，每人配 13 張，莊家先摸。輪流摸打，上限各 18 次出牌；吃、碰後的出牌也計一巡，槓補牌不另計。</p><p>可吃、碰、明槓、暗槓、加槓，也可在 A 階段自摸或榮和。打牌後若有具備役的自摸聽口，可以立刻宣告聽牌；副露後也可以。門清者可選聽牌，或支付 1,000 點立直。宣告牌若可被榮和，榮和優先。</p></section><section><h3><b>B</b> 猜牌與五次自摸</h3><p>第一位宣告聽牌的人進入 B，手牌與聽口固定。對手選兩種不同的牌，任一種命中聽口，本局即結束，不轉移和牌點數。</p><p>兩種都沒中，聽牌方可自摸至多五次。可和則選擇和牌，或蓋牌放過，繼續等高分牌；未和牌的摸牌直接打出，不可換入手牌。五次後若仍有牌，對手重新猜牌，直到海底。</p></section><section><h3>點數與勝負</h3><p>沿用日麻的役、番、符、滿貫以上上限；自摸役與自摸符照算，但付款採相同番符的榮和點數，由唯一對手支付。和牌者下局坐莊。</p><p>猜中或流局不支付罰符，原莊留任。立直棒累積至下次和牌領取。每局結算時任一方點數 ≤ 0，另一方獲勝。</p></section><section><h3>本版補充約定</h3><p>使用全 136 張牌、14 張王牌、槓寶牌與立直裏寶牌；無赤寶牌、無本場加點。固定東風場，莊家為東家，對手為南家。開放斷么九，寶牌不能單獨成役。</p><p>採一番起和；無役形聽不能宣告。B 階段不可鳴牌、槓或榮和；立直後第一次 B 自摸可計一發。採振聽規則，振聽仍可自摸。最多四槓、不採四槓流局；允許食替；不採途中流局或流局滿貫。支援天和、地和與兩立直。</p></section></div><div class="rules-footer">AI 以向聽數、可進張數選擇出牌，依牌河與副露推測聽口；不查看你的暗牌或牌山。AI 遇到合法和牌時會直接和牌。重整線上頁面會重新開局。<br><a href="./duel-riichi-python.zip" download style="display:inline-block;color:#e0be7e;margin-top:12px;text-decoration:underline">下載 Python 完整程式與說明</a></div></dialog>
-  <dialog id="reset-dialog" class="small-dialog"><h2>重新開始對局？</h2><p>雙方點數會重設為 30,000 點，並重新抽選莊家。</p><div class="dialog-buttons"><button class="button secondary" id="cancel-reset">繼續對局</button><button class="button primary" id="confirm-reset">重新開始</button></div></dialog>
+  <dialog id="rules-dialog" class="rules-dialog"><form method="dialog"><button class="close-dialog" aria-label="關閉規則">×</button></form><span class="eyebrow">HOW TO PLAY</span><h2>二人麻將規則</h2><p class="dialog-intro">以日麻為基礎，多一場讀牌與猜牌的對決。</p><div class="rules-grid"><section><h3><b>A</b> 摸打與宣告</h3><p>雙方各 30,000 點。隨機指定第一局莊家，每人配 13 張，莊家先摸。輪流摸打，上限各 18 次出牌；吃、碰後的出牌也計一巡，槓補牌不另計。</p><p>A 階段可吃、碰、明槓、暗槓、加槓，但不能自摸和牌、榮和或搶槓。即使摸到成牌，仍須先打出一張牌。打牌後若有具備役的自摸聽口，可以立刻宣告聽牌；副露後也可以。門清者可選聽牌，或支付 1,000 點立直。宣告後立即進入 B 階段，對手不能對宣告牌和牌。</p></section><section><h3><b>B</b> 猜牌與五次自摸</h3><p>第一位宣告聽牌的人進入 B，手牌與聽口固定。只有這位聽牌方可以在 B 階段自摸和牌；另一方只負責猜牌。對手選兩種不同的牌，任一種命中聽口，本局即結束，不轉移和牌點數。</p><p>兩種都沒中，聽牌方可自摸至多五次。可和則選擇和牌，或蓋牌放過，繼續等高分牌；未和牌的摸牌直接打出，不可換入手牌。五次後若仍有牌，對手重新猜牌，直到海底。</p></section><section><h3>點數與勝負</h3><p>沿用日麻的役、番、符、滿貫以上上限；自摸役與自摸符照算，但付款採相同番符的榮和點數，由唯一對手支付。和牌者下局坐莊。</p><p>猜中或流局不支付罰符，原莊留任。立直棒累積至下次和牌領取。每局結算時任一方點數 ≤ 0，另一方獲勝。</p><p>開局前可選指定局數（預設 10 局）或無限制。和牌、猜中聽口與流局都計一局，連莊也照常計算。到達指定局數後，以持有點數比較勝負，同分為平手；未領取的立直供託留在桌上，不列入雙方最終點數。</p></section><section><h3>本版補充約定</h3><p>使用全 136 張牌、14 張王牌、槓寶牌與立直裏寶牌；無赤寶牌、無本場加點。固定東風場，莊家為東家，對手為南家。開放斷么九，寶牌不能單獨成役。</p><p>採一番起和；無役形聽不能宣告。B 階段不可鳴牌、槓或榮和；立直後第一次 B 自摸可計一發。本版只有自摸和牌，振聽不影響 B 階段自摸。最多四槓、不採四槓流局；允許食替；不採途中流局或流局滿貫。保留兩立直；不計天和、地和、嶺上開花、搶槓與河底撈魚。</p></section></div><div class="rules-footer">AI 以向聽數、可進張數選擇出牌，依牌河與副露推測聽口；不查看你的暗牌或牌山。AI 只有在 B 階段擔任聽牌方時才會和牌。重整線上頁面會重新開局。<br><a href="./duel-riichi-python.zip" download style="display:inline-block;color:#e0be7e;margin-top:12px;text-decoration:underline">下載 Python 完整程式與說明</a></div></dialog>
+  <dialog id="reset-dialog" class="small-dialog setup-dialog" aria-labelledby="setup-heading" aria-describedby="setup-intro">
+    <form id="match-settings">
+      <span class="eyebrow">二人麻將</span><h2 id="setup-heading">開始新對局</h2>
+      <p id="setup-intro">雙方各 30,000 點。先選擇這場對局的局數。</p>
+      <label class="setup-field" for="match-mode">對局方式<select id="match-mode"><option value="fixed" selected>指定局數</option><option value="unlimited">無限制</option></select></label>
+      <label class="setup-field" id="round-limit-field" for="round-limit">對局局數<div class="number-field"><input id="round-limit" type="number" min="1" step="1" value="10" inputmode="numeric" required aria-describedby="setup-rule"><span>局</span></div></label>
+      <p id="setup-rule">和牌、猜中與流局都計一局；到達局數後點數高者獲勝，同分為平手。</p>
+      <p class="setup-note">一方點數小於或等於零時，對局會提前結束。</p>
+      <p id="setup-progress" class="setup-note" role="status">正在準備牌桌，可先選擇局數。</p>
+      <p id="setup-error" class="error-message" role="alert" hidden></p>
+      <div class="dialog-buttons"><button type="button" class="button secondary" id="cancel-reset" hidden>繼續對局</button><button type="submit" class="button primary" id="confirm-reset">開始對局</button></div>
+    </form>
+  </dialog>
   <dialog id="result-dialog" class="result-dialog"><form method="dialog"><button class="close-dialog" aria-label="返回牌桌">×</button></form><div id="result-content"></div><div id="result-actions" class="dialog-buttons"></div></dialog>
 </body>
 </html>

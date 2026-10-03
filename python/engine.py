@@ -147,9 +147,12 @@ class MahjongAI:
 
 
 class Game:
-    VERSION = 1
+    VERSION = 3
 
-    def __init__(self, seed=None):
+    def __init__(self, seed=None, round_limit=10):
+        if round_limit is not None and (type(round_limit) is not int or round_limit < 1):
+            raise RuleError("局數必須是大於零的整數，或選擇無限制。")
+        self.round_limit = round_limit
         self.rng = random.Random(seed)
         self.scores = [30000, 30000]
         self.pot = 0
@@ -159,6 +162,14 @@ class Game:
         self.revision = 0
         self.match_over = False
         self._new_round()
+
+    @classmethod
+    def from_options(cls, payload=None):
+        if payload is None:
+            payload = {}
+        if not isinstance(payload, dict):
+            raise RuleError("無效的對局設定。")
+        return cls(round_limit=payload.get("round_limit", 10))
 
     def log(self, message):
         self.events.append({"id": len(self.events) + 1, "text": message})
@@ -173,12 +184,9 @@ class Game:
         self.turns = [0, 0]
         self.riichi = [False, False]
         self.double_riichi = [False, False]
-        self.temporary_furiten = [False, False]
         self.drawn = [None, None]
-        self.rinshan = [False, False]
         self.calls_made = False
         self.last_discard = None
-        self.pending_declare = None
         self.pending_kan = None
         self.declarer = None
         self.guesses = []
@@ -222,7 +230,9 @@ class Game:
     def _all_tiles(self, p, hand=None):
         return list(self.hands[p] if hand is None else hand) + [t for m in self.melds[p] for t in m["tiles"]]
 
-    def _score(self, p, hand, win_tile, tsumo=True, virtual=False, chankan=False, include_ura=False):
+    def _score(self, p, hand, win_tile, virtual=False, include_ura=False):
+        # Also used for hypothetical B-stage waits. Scoring a shape does not
+        # authorize a win; _win enforces the phase and declarer restrictions.
         if win_tile not in hand:
             return None
         melds = [Meld(meld_type=m["kind"], tiles=m["tiles"], opened=m["opened"], called_tile=m.get("called")) for m in self.melds[p]]
@@ -230,15 +240,10 @@ class Game:
         if self.riichi[p] and include_ura:
             indicators += [self.dead[5 + 2 * i] for i in range(self.kan_count + 1)]
         config = HandConfig(
-            is_tsumo=tsumo, is_riichi=self.riichi[p],
+            is_tsumo=True, is_riichi=self.riichi[p],
             is_daburu_riichi=self.double_riichi[p],
-            is_tenhou=tsumo and p == self.dealer and self.turns[p] == 0 and not self.calls_made and self.phase == "A" and not virtual,
-            is_chiihou=tsumo and p != self.dealer and self.turns[p] == 0 and not self.calls_made and self.phase == "A" and not virtual,
             is_ippatsu=self.riichi[p] and self.phase == "B" and self.b_draws == 1 and not virtual,
-            is_rinshan=tsumo and self.rinshan[p] and self.phase == "A" and not virtual,
-            is_chankan=chankan,
-            is_haitei=tsumo and not self.wall and not virtual and not self.rinshan[p],
-            is_houtei=not tsumo and not self.wall and not virtual and not chankan and not (self.last_discard or {}).get("after_rinshan", False),
+            is_haitei=self.phase == "B" and not self.wall and not virtual,
             player_wind=27 if p == self.dealer else 28, round_wind=27,
             options=OptionalRules(has_open_tanyao=True, has_aka_dora=False),
         )
@@ -260,7 +265,7 @@ class Game:
             "han": response.han, "fu": response.fu, "points": amount, "limit": limit,
             "yaku": yaku,
             "fu_details": response.fu_details,
-            "tsumo": tsumo, "dealer": p == self.dealer, "chankan": chankan,
+            "tsumo": True, "dealer": p == self.dealer,
         }
 
     def waits(self, p, valid=True):
@@ -288,15 +293,6 @@ class Game:
         self._wait_cache[key] = out
         return out
 
-    def _ron(self, p, tile, chankan=False):
-        if self.temporary_furiten[p]:
-            return None
-        # Furiten considers every structural wait, even a no-yaku one.
-        own_discards = {r["tile"] // 4 for r in self.rivers[p]}
-        if own_discards.intersection(self.waits(p, valid=False)):
-            return None
-        return self._score(p, self.hands[p] + [tile], tile, tsumo=False, chankan=chankan)
-
     def _draw(self, p, rinshan=False):
         if not self.wall:
             self._end_draw("牌山已盡，本局流局。")
@@ -310,8 +306,6 @@ class Game:
         self.hands[p].append(tile)
         self.hands[p].sort()
         self.drawn[p] = tile
-        self.rinshan[p] = rinshan
-        self.temporary_furiten[p] = False
         self.turn, self.step = p, "drawn"
 
     def _next(self, discarder):
@@ -362,26 +356,16 @@ class Game:
     def _discard(self, p, tile):
         if tile not in self.hands[p]:
             raise RuleError("請選擇自己手中的牌。")
-        after_rinshan = self.rinshan[p]
         self.hands[p].remove(tile)
         self.drawn[p] = None
-        self.rinshan[p] = False
         self.turns[p] += 1
         self.rivers[p].append({"tile": tile, "face_down": False, "called": False, "phase": "A", "riichi": False})
-        self.last_discard = {"player": p, "tile": tile, "after_rinshan": after_rinshan}
+        self.last_discard = {"player": p, "tile": tile}
         self.log(self.name(p) + "打出 " + NAMES[tile // 4] + "。")
         ready = self.waits(p)
-        # A ron claim has priority over a declaration on this discard.
-        ron = self._ron(1 - p, tile)
-        if ron and p == 0:
-            self._win(1, tile, ron, tsumo=False)
-            return
+        # A never allows a win, including on the declaration discard.
         if p == 1 and ready:
-            self.pending_declare = "riichi" if self.closed(1) and self.scores[1] >= 1000 else "tenpai"
-            if ron:
-                self.turn, self.step = 0, "response"
-            else:
-                self._declare(1, self.pending_declare)
+            self._declare(1, "riichi" if self.closed(1) and self.scores[1] >= 1000 else "tenpai")
             return
         if p == 0 and ready:
             self.step = "declare"
@@ -390,7 +374,7 @@ class Game:
 
     def _offer_response(self, discarder):
         p = 1 - discarder
-        if self.call_options(p) or self._ron(p, self.last_discard["tile"]):
+        if self.call_options(p):
             self.turn, self.step = p, "response"
         else:
             self._next(discarder)
@@ -412,31 +396,18 @@ class Game:
         self.phase, self.step = "B", "guess"
         self.turn = 1 - p
         self.b_cycle = 1
-        self.pending_declare = None
         self.log(self.name(p) + ("宣告立直。" if mode == "riichi" else "宣告聽牌。") + "進入階段 B。")
 
     def _pass(self, p):
-        if self.pending_kan:
-            if self._ron(p, self.pending_kan["tile"], chankan=True):
-                self.temporary_furiten[p] = True
-            self._finish_added_kan()
-            return
-        if self._ron(p, self.last_discard["tile"]):
-            self.temporary_furiten[p] = True
-        if self.pending_declare:
-            self._declare(1 - p, self.pending_declare)
-        else:
-            self._next(self.last_discard["player"])
+        self._next(self.last_discard["player"])
 
     def _call(self, p, idx):
         opts = self.call_options(p)
-        if not isinstance(idx, int) or not 0 <= idx < len(opts) or self.pending_declare or self.pending_kan:
+        if not isinstance(idx, int) or not 0 <= idx < len(opts) or self.pending_kan:
             raise RuleError("這個鳴牌選項已失效。")
         opt = opts[idx]
         tile = self.last_discard["tile"]
         other = 1 - p
-        if self._ron(p, tile):
-            self.temporary_furiten[p] = True
         for t in opt["consume"]:
             self.hands[p].remove(t)
         self.rivers[other][-1]["called"] = True
@@ -454,31 +425,8 @@ class Game:
             raise RuleError("無法進行這個槓。")
         opt = opts[idx]
         tiles = [t for t in self.hands[p] if t // 4 == opt["type"]]
-        if opt["kind"] == "ankan":
-            # Kokushi can rob a concealed kan under the adopted Japanese rules.
-            tile = tiles[-1]
-            ron = self._ron(1 - p, tile, chankan=True)
-            kokushi = ron and any("Kokushi" in y["name"] or "國士" in y["name"] for y in ron["yaku"])
-            self.pending_kan = {"player": p, "tile": tile, "option": opt, "concealed": True}
-            if kokushi:
-                if p == 0:
-                    self.hands[p].remove(tile)
-                    self._win(1, tile, ron, tsumo=False)
-                else:
-                    self.turn, self.step = 0, "kan_response"
-                return
-            self._finish_added_kan()
-            return
-        tile = tiles[0]
-        self.pending_kan = {"player": p, "tile": tile, "option": opt, "concealed": False}
-        ron = self._ron(1 - p, tile, chankan=True)
-        if ron:
-            if p == 0:
-                self.hands[p].remove(tile)
-                self._win(1, tile, ron, tsumo=False)
-            else:
-                self.turn, self.step = 0, "kan_response"
-            return
+        # A permits kan and replacement draws, but never robbing a kan.
+        self.pending_kan = {"player": p, "tile": tiles[0], "option": opt, "concealed": opt["kind"] == "ankan"}
         self._finish_added_kan()
 
     def _finish_added_kan(self):
@@ -541,15 +489,16 @@ class Game:
         else:
             self.step = "b_draw"
 
-    def _win(self, p, tile, score, tsumo=True):
-        # A-draw tiles are already in hand; B-draw and ron tiles are not.
-        if tile not in self.hands[p]:
-            self.hands[p].append(tile)
-            self.hands[p].sort()
+    def _win(self, p):
+        if (self.phase != "B" or self.step != "b_review" or
+                p != self.declarer or self.turn != p or
+                self.b_candidate is None or self.b_score is None):
+            raise RuleError("只有 B 階段的聽牌方可在自摸成功時和牌。")
+        tile, score = self.b_candidate, self.b_score
+        self.hands[p].append(tile)
+        self.hands[p].sort()
         if self.riichi[p]:
-            score = self._score(p, self.hands[p], tile, tsumo=tsumo, chankan=score.get("chankan", False), include_ura=True)
-        if not tsumo and not self.pending_kan and self.last_discard and self.last_discard["tile"] == tile:
-            self.rivers[1 - p][-1]["called"] = True
+            score = self._score(p, self.hands[p], tile, include_ura=True)
         payment = score["points"]
         self.scores[p] += payment + self.pot
         self.scores[1 - p] -= payment
@@ -557,22 +506,34 @@ class Game:
         self.pot = 0
         previous_dealer = self.dealer
         self.dealer = p
-        self.match_over = min(self.scores) <= 0
         self.result = {"kind": "win", "winner": p, "tile": tile, "score": score, "pot": award,
-                       "message": self.name(p) + ("自摸和牌" if tsumo else "榮和") + "，獲得 %s 點。" % format(payment + award, ","),
+                       "message": self.name(p) + "自摸和牌，獲得 %s 點。" % format(payment + award, ","),
                        "previous_dealer": previous_dealer, "waits": self.frozen_waits,
-                       "ura_indicators": [self.dead[5 + 2 * i] for i in range(self.kan_count + 1)] if self.riichi[p] else [],
-                       "match_winner": p if self.match_over else None}
+                       "ura_indicators": [self.dead[5 + 2 * i] for i in range(self.kan_count + 1)] if self.riichi[p] else []}
         self.phase, self.step = "result", "result"
         self.b_candidate, self.b_score = None, None
         self.log(self.result["message"])
+        self._settle_match()
 
     def _end_draw(self, message, kind="draw"):
-        self.match_over = min(self.scores) <= 0
         self.result = {"kind": kind, "message": message, "waits": self.frozen_waits,
-                       "winner": None, "match_winner": max(range(2), key=lambda p: self.scores[p]) if self.match_over else None}
+                       "winner": None}
         self.phase, self.step = "result", "result"
         self.log(message)
+        self._settle_match()
+
+    def _settle_match(self):
+        # Every completed hand counts once, including blocked hands and draws.
+        reason = "bankruptcy" if min(self.scores) <= 0 else (
+            "round_limit" if self.round_limit is not None and self.round >= self.round_limit else None)
+        self.match_over = reason is not None
+        winner = None
+        if self.match_over and self.scores[0] != self.scores[1]:
+            winner = 0 if self.scores[0] > self.scores[1] else 1
+        self.result.update(match_winner=winner, match_end_reason=reason)
+        if self.match_over:
+            outcome = "雙方同分，平手。" if winner is None else self.name(winner) + "贏得對局。"
+            self.log(("已完成 %d 局，" % self.round if reason == "round_limit" else "一方點數歸零，") + outcome)
 
     def ai_observation(self, p=1):
         # Physical IDs are deduplicated because called river tiles also appear
@@ -600,16 +561,11 @@ class Game:
             elif self.step == "b_review":
                 # AI takes a guaranteed legal win. Humans may press for value.
                 if self.b_score:
-                    self._win(1, self.b_candidate, self.b_score)
+                    self._win(1)
                 else:
                     self._b_skip()
             return
         if self.step == "response":
-            tile = self.last_discard["tile"]
-            ron = self._ron(p, tile)
-            if ron:
-                self._win(p, tile, ron, tsumo=False)
-                return
             current = shanten(self.hands[p], self.melds[p])
             best = None
             for i, opt in enumerate(self.call_options(p)):
@@ -631,11 +587,6 @@ class Game:
                 self._pass(p)
             return
         if self.step == "drawn":
-            tile = self.drawn[p]
-            score = self._score(p, self.hands[p], tile) if tile is not None else None
-            if score:
-                self._win(p, tile, score)
-                return
             opts = self.kan_options(p)
             if opts:
                 self._kan(p, 0)
@@ -651,18 +602,19 @@ class Game:
             return {"ai": True} if p == 0 else {}
         if self.phase == "B":
             if self.step == "guess":
-                return {"guess": True}
+                return {"guess": True} if p != self.declarer else {}
+            if p != self.declarer:
+                return {}
             if self.step == "b_draw":
                 return {"draw": True}
-            return {"skip": True, "win": bool(self.b_score)}
+            if self.step == "b_review":
+                return {"skip": True, "win": self.b_candidate is not None and bool(self.b_score)}
+            return {}
         if self.step == "declare":
             return {"tenpai": bool(self.waits(p)), "riichi": self.closed(p) and self.scores[p] >= 1000, "continue": True}
-        if self.step == "kan_response":
-            return {"ron": True, "pass": True}
         if self.step == "response":
-            return {"ron": bool(self._ron(p, self.last_discard["tile"])), "pass": True,
-                    "calls": [] if self.pending_declare else self.call_options(p)}
-        return {"discard": True, "win": self.drawn[p] is not None and bool(self._score(p, self.hands[p], self.drawn[p])), "kans": self.kan_options(p)}
+            return {"pass": True, "calls": self.call_options(p)}
+        return {"discard": True, "kans": self.kan_options(p)}
 
     def action(self, action, payload=None):
         payload = payload or {}
@@ -702,23 +654,11 @@ class Game:
         elif action == "skip":
             self._b_skip()
         elif action == "win":
-            if self.phase == "B":
-                self._win(0, self.b_candidate, self.b_score)
-            else:
-                self._win(0, self.drawn[0], self._score(0, self.hands[0], self.drawn[0]))
-        elif action == "ron":
-            if self.pending_kan:
-                data = self.pending_kan
-                tile = data["tile"]
-                self.hands[data["player"]].remove(tile)
-                self._win(0, tile, self._ron(0, tile, chankan=True), tsumo=False)
-            else:
-                tile = self.last_discard["tile"]
-                self._win(0, tile, self._ron(0, tile), tsumo=False)
+            self._win(0)
         elif action == "next_round":
             self._new_round()
         elif action == "new_match":
-            self.__init__()
+            self.__init__(round_limit=payload.get("round_limit", 10))
         self.revision += 1
         return self.view()
 
@@ -739,10 +679,9 @@ class Game:
         legal = self.legal()
         human_waits = self.waits(0) if len(self.hands[0]) % 3 == 1 and (self.phase != "B" or self.declarer == 0) else []
         current_score = self.b_score if self.phase == "B" and self.declarer == 0 else None
-        if self.phase == "A" and legal.get("win"):
-            current_score = self._score(0, self.hands[0], self.drawn[0])
         return {
-            "version": self.VERSION, "revision": self.revision, "round": self.round, "phase": self.phase,
+            "version": self.VERSION, "revision": self.revision, "round": self.round,
+            "round_limit": self.round_limit, "phase": self.phase,
             "step": self.step, "turn": self.turn, "players": players, "dealer": self.dealer,
             "dice": self.dice, "wall_count": len(self.wall), "dead_count": 14, "pot": self.pot,
             "dora_indicators": self.indicators(), "dora_types": [dora_type(t) for t in self.indicators()],
@@ -764,7 +703,7 @@ def dispatch_json(raw):
     try:
         data = json.loads(raw)
         if data.get("action") == "new_match":
-            _browser_game = Game()
+            _browser_game = Game.from_options(data.get("payload"))
             view = _browser_game.view()
         elif _browser_game is None:
             raise RuleError("請先開始對局。")

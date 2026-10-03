@@ -46,7 +46,7 @@ function tile(id, options={}) {
   const back = id === null || options.back;
   const attrs = options.attrs || '';
   const cls = `tile ${back?'back':''} ${options.className||''}`;
-  const label=back?'蓋住的牌':NAMES[type];
+  const label=options.label || (back?'蓋住的牌':NAMES[type]);
   if(options.button) return `<button type="button" class="${cls}" aria-label="${label}" title="${label}" ${options.disabled?'disabled':''} ${attrs}>${back?'':symbol(type)}</button>`;
   return `<span class="${cls}" role="img" aria-label="${label}" title="${label}" ${attrs}>${back?'':symbol(type)}</span>`;
 }
@@ -76,22 +76,28 @@ function transport(request) {
 async function act(action, payload={}) {
   if(busy) return null;
   clearTimeout(aiTimer); clearError(); busy=true;
+  setSetupBusy();
   document.querySelectorAll('#actions button,#human-hand button,#action-content button').forEach(b=>b.disabled=true);
   try {
     const result=await transport({action,payload,revision:state?.revision});
     if(!result.ok) throw new Error(result.error||'操作失敗。');
     state=result.state;
+    if(action==='new_match') {resultShown=null;$('event-list').dataset.latest='';}
     selectedTile=null;
     if(action==='guess'||action==='new_match'||action==='next_round') guesses=[];
-    $('loading').classList.add('hidden');
     busy=false;
+    setSetupBusy();
+    if(!state) return null;
+    $('loading').classList.add('hidden');
     render();
     scheduleAI();
     return state;
   } catch(error) {
     busy=false;
+    setSetupBusy();
     if(state) render();
     notify(error.message);
+    if($('reset-dialog').open){$('setup-error').textContent=error.message;$('setup-error').hidden=false;}
     if(!state){
       $('loading-title').textContent='暫時無法載入牌桌';
       $('loading-message').textContent=error.message;
@@ -116,10 +122,29 @@ function renderRiver(player) {
   return player.river.map(r=>tile(r.tile,{back:r.face_down,className:`${r.called?'called':''} ${r.riichi?'riichi-discard':''} ${r.phase==='B'?'b-discard':''}`})).join('');
 }
 
+function winningTile(playerIndex) {
+  return state.result?.kind==='win' && state.result.winner===playerIndex ? state.result.tile : null;
+}
+function displayHand(playerIndex) {
+  const hand=state.players[playerIndex].hand;
+  const won=winningTile(playerIndex);
+  // Match the physical tile ID, preserving any other copies of the same kind.
+  return hand?.filter(t=>t!==won) ?? null;
+}
+function winningDrawMarkup(id) {
+  return `<small>自摸和牌</small>${tile(id)}<small>${NAMES[Math.floor(id/4)]}</small>`;
+}
+function renderGuessHistory() {
+  const panel=$('guess-history-panel'),history=state.guess_history;
+  panel.hidden=state.declarer!==1;
+  $('guess-history-count').textContent=`${history.length} 輪`;
+  $('guess-history-list').innerHTML=history.length?history.map(entry=>`<li><span>第 ${entry.cycle} 輪</span><div class="history-tiles">${entry.tiles.map(t=>tile(t,{type:true})).join('')}</div><span class="guess-outcome ${entry.hit?'hit':''}">${entry.hit?'命中':'未命中'}</span></li>`).join(''):'<li class="history-empty">還沒有猜牌紀錄。</li>';
+}
+
 function render(){
   if(!state) return;
   const [human,ai]=state.players, legal=state.legal;
-  $('round-label').innerHTML=`第 ${String(state.round).padStart(2,'0')} 局 <span>東風場</span>`;
+  $('round-label').innerHTML=`第 ${String(state.round).padStart(2,'0')} 局 <span>${state.round_limit===null?'無限制':`共 ${state.round_limit} 局`} · 東風場</span>`;
   const isB=state.phase==='B';
   $('phase-label').textContent=state.phase==='result'?'本局結算':isB?'階段 B · 猜牌對決':'階段 A · 摸打';
   $('turn-label').textContent=state.phase==='result'?(state.match_over?'對局結束':'準備下一局'):isB?`第 ${state.b_cycle} 輪猜牌`:`${state.turn===0?'你的':'AI 的'}回合`;
@@ -128,8 +153,10 @@ function render(){
   $('ai-detail').textContent=ai.riichi?'立直':state.declarer===1?'已宣告聽牌':ai.closed?'門清 · 以公開資訊判斷':'副露 · 以公開資訊判斷';
   const shape=state.shanten===-1?'牌型完成':state.shanten===0?'聽牌牌型':`${state.shanten} 向聽`;
   $('human-detail').textContent=human.riichi?'立直 · 手牌已固定':state.declarer===0?'已宣告聽牌 · 手牌已固定':`${human.closed?'門清':'副露'} · ${shape}`;
-  $('ai-hand').innerHTML=ai.hand?ai.hand.map(t=>tile(t)).join(''):Array.from({length:ai.hand_count},()=>tile(null)).join('');
-  let hand=[...human.hand];
+  const aiHand=displayHand(1),aiWin=winningTile(1),humanWin=winningTile(0);
+  $('ai-hand').innerHTML=aiHand?aiHand.map(t=>tile(t)).join(''):Array.from({length:ai.hand_count},()=>tile(null)).join('');
+  $('ai-winning-tile').innerHTML=aiWin!==null?winningDrawMarkup(aiWin):'';
+  let hand=displayHand(0);
   const current=state.phase==='A'?state.drawn:null;
   if(current!==null&&hand.includes(current)) hand=hand.filter(t=>t!==current).concat(current);
   $('human-hand').innerHTML=hand.map(t=>tile(t,{button:true,disabled:!legal.discard||busy,className:`${t===selectedTile?'selected':''} ${t===current?'drawn':''}`,attrs:`data-discard-id="${t}" aria-pressed="${selectedTile===t}"`})).join('');
@@ -144,13 +171,14 @@ function render(){
   $('center-title').textContent=state.phase==='result'?'本局結束':isB?'猜牌對決':'摸打階段';
   $('dora-row').innerHTML=state.dora_indicators.map(t=>tile(t)).join('')+Array.from({length:5-state.dora_indicators.length},()=>tile(null)).join('');
   $('dora-help').textContent=`寶牌：${state.dora_types.map(t=>NAMES[t]).join('、')}`;
-  $('draw-candidate').innerHTML=state.candidate!==null?`<small>${state.candidate_score?'可以和牌':'本次自摸'}</small>${tile(state.candidate)}`:'';
+  $('draw-candidate').innerHTML=humanWin!==null?winningDrawMarkup(humanWin):state.candidate!==null?`<small>${state.candidate_score?'可以和牌':'本次自摸'}</small>${tile(state.candidate)}`:'';
   const oldEvents=$('event-list').dataset.latest;
   if(String(state.events.at(-1)?.id)!==oldEvents){
     $('event-list').innerHTML=[...state.events].reverse().slice(0,12).map(e=>`<li>${escapeHTML(e.text)}</li>`).join('');
     $('event-list').dataset.latest=String(state.events.at(-1)?.id);
   }
   $('event-count').textContent=`第 ${state.round} 局`;
+  renderGuessHistory();
   renderActions();
   if(state.result) {
     const key=`${state.round}-${state.revision}`;
@@ -184,10 +212,9 @@ function renderActions(){
   }
   if(l.discard){
     let buttons='';
-    if(l.win) buttons+=button(`自摸和牌 · ${format(s.candidate_score.points)} 點`,'win','win');
     buttons+=button(selectedTile===null?'選擇一張牌':`打出 ${NAMES[Math.floor(selectedTile/4)]}`,'discard','primary',{tile:selectedTile},selectedTile===null);
     for(let i=0;i<(l.kans||[]).length;i++) buttons+=button(l.kans[i].label,'kan','secondary',{index:i});
-    setAction('輪到你','選擇一張牌打出','點選手牌，再按「打出」。也可以雙擊手牌直接打出。','',buttons);
+    setAction('輪到你','選擇一張牌打出',s.shanten===-1?'A 階段即使牌型完成也不能和牌。請先打牌，再宣告聽牌進入 B。':'A 階段不能和牌。點選手牌後按「打出」，或雙擊手牌。','',buttons);
     return;
   }
   if(l.tenpai){
@@ -195,16 +222,17 @@ function renderActions(){
     return;
   }
   if(l.pass){
-    let buttons=l.ron?button('榮和','ron','win'):'';
+    let buttons='';
     (l.calls||[]).forEach((c,i)=>buttons+=button(`${c.label}<span class="call-tiles">${c.tiles.map(t=>tile(t)).join('')}</span>`,'call','secondary call-action',{index:i}));
-    buttons+=button('略過','pass',l.ron||l.calls?.length?'quiet':'primary');
-    setAction('回應對手',s.step==='kan_response'?'可以搶槓和牌':s.last_discard?`對手打出 ${NAMES[Math.floor(s.last_discard.tile/4)]}`:'選擇你的回應',s.step==='kan_response'?'你可以榮和，或讓對手完成槓與補牌。':'可以選擇鳴牌、和牌，或略過並繼續摸牌。','',buttons);
+    buttons+=button('略過','pass',l.calls?.length?'quiet':'primary');
+    setAction('回應對手',s.last_discard?`對手打出 ${NAMES[Math.floor(s.last_discard.tile/4)]}`:'選擇你的回應','可以鳴牌或略過。A 階段不能和牌。','',buttons);
     return;
   }
   if(l.guess){
-    const grid=Array.from({length:4},(_,suit)=>`<div class="guess-suit">${Array.from({length:suit===3?7:9},(_,i)=>suit*9+i).map(t=>tile(t,{type:true,button:true,className:guesses.includes(t)?'selected':'',attrs:`data-guess="${t}" aria-pressed="${guesses.includes(t)}"`})).join('')}</div>`).join('');
+    const previous=new Set(s.guess_history.flatMap(entry=>entry.tiles));
+    const grid=Array.from({length:4},(_,suit)=>`<div class="guess-suit">${Array.from({length:suit===3?7:9},(_,i)=>suit*9+i).map(t=>tile(t,{type:true,button:true,className:`${guesses.includes(t)?'selected':''} ${previous.has(t)?'guessed-before':''}`,label:`${NAMES[t]}${previous.has(t)?'，本局已猜過':''}`,attrs:`data-guess="${t}" aria-pressed="${guesses.includes(t)}"`})).join('')}</div>`).join('');
     const slots=[0,1].map(i=>`<span class="guess-slot">${guesses[i]===undefined?'？':tile(guesses[i],{type:true})}</span>`).join('');
-    const history=s.guess_history.length?`<p class="guess-history">上輪：${s.guess_history.at(-1).tiles.map(t=>NAMES[t]).join('、')}，未命中</p>`:'';
+    const history=s.guess_history.length?'<p class="guess-history-key">金色底線標示本局已猜過的牌，仍可選取。完整紀錄列於下方。</p>':'';
     setAction(`第 ${s.b_cycle} 輪 · 由你猜牌`,'指出兩種和牌','觀察對手的牌河與副露。任一種命中，就能阻止對手和牌。',`<div class="guess-grid">${grid}</div><div class="guess-label"><span>你的選擇</span><span>${guesses.length} / 2</span></div><div class="selected-guesses">${slots}</div>${history}`,button('確認猜牌','guess','primary',{tiles:guesses},guesses.length!==2));
     return;
   }
@@ -222,13 +250,13 @@ function renderActions(){
 
 function renderResult(){
   const r=state.result,win=r.kind==='win',p=win?r.winner:state.declarer;
-  let html=`<div class="result-symbol">${win?'和':r.kind==='blocked'?'見':'流'}</div><span class="eyebrow">第 ${state.round} 局 · ${win?(r.score.tsumo?'自摸':'榮和'):'結算'}</span><h2>${win?(r.winner===0?'你和牌了':'AI 和牌了'):r.kind==='blocked'?'聽口被猜中了':'本局流局'}</h2><p class="result-description">${escapeHTML(r.message)}</p>`;
-  if(state.match_over) html+=`<div class="match-win">${r.match_winner===0?'你贏得了這場對局！':'AI 贏得了這場對局。'}</div>`;
+  let html=`<div class="result-symbol">${win?'和':r.kind==='blocked'?'見':'流'}</div><span class="eyebrow">第 ${state.round} 局 · ${win?'B 階段自摸':'結算'}</span><h2>${win?(r.winner===0?'你和牌了':'AI 和牌了'):r.kind==='blocked'?'聽口被猜中了':'本局流局'}</h2><p class="result-description">${escapeHTML(r.message)}</p>`;
+  if(state.match_over) html+=`<div class="match-win">${r.match_winner===null?'雙方同分，這場對局平手。':r.match_winner===0?'你贏得了這場對局！':'AI 贏得了這場對局。'}<span>${r.match_end_reason==='round_limit'?`已完成 ${state.round_limit} 局，以最終點數決定勝負。`:'一方點數歸零，對局提前結束。'}</span></div>`;
   if(win){
     const s=r.score;
     html+=`<div class="result-score">${format(s.points)} <small>點</small></div><div class="result-fu">${s.han} 番 ${s.fu} 符${s.limit?' · '+s.limit:''}${s.dealer?' · 莊家':''}</div>`;
     const player=state.players[p];
-    html+=`<div class="result-tiles">${player.hand.map(t=>tile(t,{className:t===r.tile?'wait-highlight':''})).join('')}${player.melds.map(m=>'<span style="width:6px"></span>'+m.tiles.map(t=>tile(t)).join('')).join('')}</div><div class="yaku-list">${s.yaku.map(y=>`<div>${escapeHTML(y.name)}<span>${y.han} 番</span></div>`).join('')}${r.pot?`<div>立直供託<span>+ ${format(r.pot)} 點</span></div>`:''}</div>`;
+    html+=`<div class="result-hand-layout"><div class="result-concealed"><p class="result-description">${p===0?'你的':'AI 的'}手牌</p><div class="result-tiles">${displayHand(p).map(t=>tile(t)).join('')}</div></div><div class="result-winning-tile" aria-label="自摸和牌張：${NAMES[Math.floor(r.tile/4)]}"><p>自摸和牌</p><div class="result-tiles">${tile(r.tile)}</div><span>${NAMES[Math.floor(r.tile/4)]}</span></div></div>${player.melds.length?`<div class="result-melds">${player.melds.map(m=>`<div><p class="result-description">${m.opened?'副露':'暗槓'}</p><div class="result-tiles">${m.tiles.map(t=>tile(t)).join('')}</div></div>`).join('')}</div>`:''}<div class="yaku-list">${s.yaku.map(y=>`<div>${escapeHTML(y.name)}<span>${y.han} 番</span></div>`).join('')}${r.pot?`<div>立直供託<span>+ ${format(r.pot)} 點</span></div>`:''}</div>`;
     if(r.ura_indicators?.length)html+=`<p class="result-description">裏寶牌指示牌</p><div class="result-tiles">${r.ura_indicators.map(t=>tile(t)).join('')}</div>`;
   } else if(r.waits?.length){
     html+=`<p class="result-description" style="margin-top:20px">本局聽口</p><div class="result-tiles">${r.waits.map(t=>tile(t,{type:true})).join('')}</div>`;
@@ -236,6 +264,7 @@ function renderResult(){
   }
   html+=`<div class="score-summary"><div>你<strong>${format(state.players[0].score)}</strong></div><div>AI<strong>${format(state.players[1].score)}</strong></div></div>`;
   if(!state.match_over)html+=`<p class="result-description" style="margin-top:16px">下局由${state.dealer===0?'你':' AI '}坐莊${state.pot?` · 供託 ${format(state.pot)} 點保留`:''}</p>`;
+  else if(state.pot)html+=`<p class="result-description" style="margin-top:16px">未領取的 ${format(state.pot)} 點供託留在桌上，不列入雙方最終點數。</p>`;
   $('result-content').innerHTML=html;
   $('result-actions').innerHTML=button('返回牌桌','close_result','secondary')+button(state.match_over?'再挑戰一場':'開始下一局',state.match_over?'new_match':'next_round');
 }
@@ -261,7 +290,8 @@ document.addEventListener('click',async e=>{
     if(updated?.legal.draw) await act('draw');
     return;
   }
-  if(action==='next_round'||action==='new_match')$('result-dialog').close();
+  if(action==='new_match'){openMatchSetup();return;}
+  if(action==='next_round')$('result-dialog').close();
   await act(action,b.dataset.payload?JSON.parse(b.dataset.payload):{});
 });
 document.addEventListener('dblclick',e=>{
@@ -269,13 +299,52 @@ document.addEventListener('dblclick',e=>{
   if(t&&!busy&&state?.legal.discard)act('discard',{tile:Number(t.dataset.discardId)});
 });
 $('rules-button').onclick=()=>{clearTimeout(aiTimer);$('rules-dialog').showModal();};
-$('reset-button').onclick=()=>{clearTimeout(aiTimer);$('reset-dialog').showModal();};
+$('reset-button').onclick=()=>{if(!busy)openMatchSetup();};
 $('cancel-reset').onclick=()=>$('reset-dialog').close();
-$('confirm-reset').onclick=()=>{if(busy)return;$('reset-dialog').close();resultShown=null;act('new_match');};
+$('reset-dialog').addEventListener('cancel',e=>{if(!state||busy)e.preventDefault();});
+$('match-mode').onchange=updateSetupMode;
+$('match-settings').addEventListener('submit',async e=>{
+  e.preventDefault();
+  if(busy||!$('match-settings').reportValidity())return;
+  const limit=$('match-mode').value==='unlimited'?null:Number($('round-limit').value);
+  if(limit!==null&&(!Number.isSafeInteger(limit)||limit<1)){
+    $('setup-error').textContent='請輸入大於零的整數局數。';$('setup-error').hidden=false;return;
+  }
+  $('setup-error').hidden=true;
+  const updated=await act('new_match',{round_limit:limit});
+  if(updated)$('reset-dialog').close();
+});
 document.querySelectorAll('dialog').forEach(d=>d.addEventListener('close',scheduleAI));
 document.addEventListener('keydown',e=>{
   if(e.key==='Enter'&&!document.querySelector('dialog[open]')&&!busy&&state?.legal.discard&&selectedTile!==null&&!e.target.closest('button'))act('discard',{tile:selectedTile});
 });
+
+function updateSetupMode() {
+  const unlimited=$('match-mode').value==='unlimited';
+  $('round-limit-field').hidden=unlimited;
+  $('round-limit').disabled=unlimited||busy;
+  $('setup-rule').textContent=unlimited?'持續對局，直到一方點數小於或等於零。':'和牌、猜中與流局都計一局；到達局數後點數高者獲勝，同分為平手。';
+}
+function setSetupBusy() {
+  $('match-mode').disabled=busy;
+  $('confirm-reset').disabled=busy;
+  $('cancel-reset').disabled=busy;
+  $('confirm-reset').textContent=busy?'正在準備牌桌…':'開始對局';
+  updateSetupMode();
+}
+function openMatchSetup() {
+  clearTimeout(aiTimer);
+  $('result-dialog').close();
+  $('setup-heading').textContent=state&&!state.match_over?'重新開始對局':'開始新對局';
+  $('setup-intro').textContent=state&&!state.match_over?'目前進度將重設，雙方以 30,000 點重新開始。':'雙方各 30,000 點。先選擇這場對局的局數。';
+  $('cancel-reset').hidden=!state;
+  $('setup-error').hidden=true;
+  const limit=state?state.round_limit:10;
+  $('match-mode').value=limit===null?'unlimited':'fixed';
+  $('round-limit').value=limit===null?10:limit;
+  setSetupBusy();
+  if(!$('reset-dialog').open)$('reset-dialog').showModal();
+}
 
 function registerTools(){
   const context=document.modelContext;
@@ -283,21 +352,26 @@ function registerTools(){
   const lifecycle=new AbortController();
   const register=tool=>{try{Promise.resolve(context.registerTool(tool,{signal:lifecycle.signal})).catch(()=>{});}catch{}};
   register({name:'read_mahjong_table',title:'讀取麻將牌桌',description:'Read the visible table and legal actions without revealing the AI concealed hand or wall.',inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:true,untrustedContentHint:false},execute:()=>({phase:state?.phase,step:state?.step,legal:state?.legal,players:state?.players,waits:state?.waits,revision:state?.revision})});
-  register({name:'play_mahjong_action',title:'執行麻將操作',description:'Perform a legal human game action and update the visible table. Does not start a new match or automatically play the AI.',inputSchema:{type:'object',properties:{action:{type:'string',enum:['discard','tenpai','riichi','continue','pass','call','kan','guess','draw','skip','win','ron','next_round']},payload:{type:'object'}},required:['action'],additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:false},execute:async input=>{const allowed=['discard','tenpai','riichi','continue','pass','call','kan','guess','draw','skip','win','ron','next_round'];if(!input||!allowed.includes(input.action)||busy)throw new Error('Invalid action or game is busy');if(input.action==='next_round')$('result-dialog').close();const updated=await act(input.action,input.payload||{});if(!updated)throw new Error($('error-message').textContent);return{phase:updated.phase,step:updated.step,legal:updated.legal,revision:updated.revision};}});
+  register({name:'play_mahjong_action',title:'執行麻將操作',description:'Perform a legal human game action and update the visible table. Does not start a new match or automatically play the AI.',inputSchema:{type:'object',properties:{action:{type:'string',enum:['discard','tenpai','riichi','continue','pass','call','kan','guess','draw','skip','win','next_round']},payload:{type:'object'}},required:['action'],additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:false},execute:async input=>{const allowed=['discard','tenpai','riichi','continue','pass','call','kan','guess','draw','skip','win','next_round'];if(!input||!allowed.includes(input.action)||busy)throw new Error('Invalid action or game is busy');if(input.action==='next_round')$('result-dialog').close();const updated=await act(input.action,input.payload||{});if(!updated)throw new Error($('error-message').textContent);return{phase:updated.phase,step:updated.step,legal:updated.legal,revision:updated.revision};}});
   window.addEventListener('pagehide',()=>lifecycle.abort(),{once:true});
 }
 
 async function initialize(){
+  openMatchSetup();
+  $('setup-progress').hidden=Boolean(window.MAHJONG_BACKEND);
   if(!window.MAHJONG_BACKEND){
-    worker=new Worker('./worker.js');
+    worker=new Worker('./worker.js?v=3');
     worker.onmessage=event=>{
-      if(event.data.type==='progress'){$('loading-message').textContent=event.data.message;return;}
+      if(event.data.type==='progress'){$('loading-message').textContent=event.data.message;$('setup-progress').textContent=event.data.message;return;}
       const item=pending.get(event.data.id);
       if(item){clearTimeout(item.timeout);pending.delete(event.data.id);item.resolve(event.data);}
     };
     worker.onerror=error=>{for(const item of pending.values()){clearTimeout(item.timeout);item.reject(new Error(error.message||'Python 規則引擎載入失敗。'));}pending.clear();};
   }
-  await act(window.MAHJONG_BACKEND?'state':'new_match');
+  if(window.MAHJONG_BACKEND){
+    const existing=await act('state');
+    if(existing)$('reset-dialog').close();
+  }
   registerTools();
 }
 initialize();
